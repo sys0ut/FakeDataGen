@@ -176,19 +176,6 @@ public class BasicValueGenerator {
             return faker.lorem().sentence();
         } else if (dataType.contains("text")) {
             return faker.lorem().paragraph();
-        } else if (dataType.contains("date")) {
-            // DATE 타입 - 현재 날짜 기준으로 랜덤 생성
-            java.time.LocalDate today = java.time.LocalDate.now();
-            java.time.LocalDate randomDate = today.minusDays(faker.number().numberBetween(1, 365));
-            return randomDate.toString();
-        } else if (dataType.contains("time")) {
-            // TIME 타입 - 랜덤 시간 생성
-            java.time.LocalTime randomTime = java.time.LocalTime.of(
-                    faker.number().numberBetween(0, 24),
-                    faker.number().numberBetween(0, 60),
-                    faker.number().numberBetween(0, 60)
-            );
-            return randomTime.toString();
         } else if (dataType.contains("timestamp")) {
             // TIMESTAMP 타입 - 현재 시간 기준으로 랜덤 생성
             java.time.LocalDateTime now = java.time.LocalDateTime.now();
@@ -205,6 +192,19 @@ public class BasicValueGenerator {
                     .withMinute(faker.number().numberBetween(0, 60))
                     .withSecond(faker.number().numberBetween(0, 60));
             return randomDateTime.toString();
+        } else if (dataType.contains("date") && !dataType.contains("datetime") && !dataType.contains("timestamp")) {
+            // DATE 타입 - 현재 날짜 기준으로 랜덤 생성 (datetime, timestamp가 아닌 경우만)
+            java.time.LocalDate today = java.time.LocalDate.now();
+            java.time.LocalDate randomDate = today.minusDays(faker.number().numberBetween(1, 365));
+            return randomDate.toString();
+        } else if (dataType.contains("time") && !dataType.contains("datetime") && !dataType.contains("timestamp")) {
+            // TIME 타입 - 랜덤 시간 생성 (datetime, timestamp가 아닌 경우만)
+            java.time.LocalTime randomTime = java.time.LocalTime.of(
+                    faker.number().numberBetween(0, 24),
+                    faker.number().numberBetween(0, 60),
+                    faker.number().numberBetween(0, 60)
+            );
+            return randomTime.toString();
         } else if (dataType.contains("integer") || dataType.contains("int")) {
             // INT/INTEGER 타입
             if (column.isAutoIncrement()) {
