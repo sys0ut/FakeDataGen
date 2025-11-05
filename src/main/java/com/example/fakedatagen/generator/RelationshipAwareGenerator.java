@@ -126,6 +126,9 @@ public class RelationshipAwareGenerator {
             records.add(record);
         }
         
+        // 테이블 데이터 생성 완료 후 Faker 타입 매핑 정보 로그 출력 (1번만)
+        basicValueGenerator.logTableFakerMappings(tableNameOnly);
+        
         return records;
     }
     
