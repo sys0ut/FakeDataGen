@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="ko" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fake Data Generator</title>
+    <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+    <div class="container-narrow">
+        <div class="brand" style="margin-bottom:18px;">
+            <span style="font-size:1.1rem;color:#8b93a7;">Fake Data Generator</span>
+        </div>
+
+        <!-- 연결 설정 -->
+        <div class="panel" style="margin-bottom:16px;">
+            <div class="panel-header"><span>연결 설정</span><button class="btn btn-ghost" onclick="testConnection()">연결 테스트</button></div>
+            <div class="panel-body">
+                <div class="grid grid-2">
+                    <div>
+                        <label for="dbHost">호스트</label>
+                        <input type="text" id="dbHost" name="dbHost">
+                    </div>
+                    <div>
+                        <label for="dbPort">포트</label>
+                        <input type="number" id="dbPort" name="dbPort">
+                    </div>
+                    <div>
+                        <label for="dbName">DB 이름</label>
+                        <input type="text" id="dbName" name="dbName">
+                    </div>
+                    <div>
+                        <label for="dbUsername">사용자</label>
+                        <input type="text" id="dbUsername" name="dbUsername">
+                    </div>
+                    <div>
+                        <label for="dbPassword">비밀번호</label>
+                        <input type="password" id="dbPassword" name="dbPassword">
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 스키마 입력 -->
+        <div class="panel">
+            <div class="panel-header"><span>스키마 입력</span></div>
+            <div class="panel-body">
+                <form th:action="@{/parse}" method="post" onsubmit="addDbInfoToForm(this)">
+                            <!-- 데이터베이스 연결 정보를 숨겨진 필드로 추가 -->
+                            <input type="hidden" name="dbHost" id="formDbHost">
+                            <input type="hidden" name="dbPort" id="formDbPort">
+                            <input type="hidden" name="dbName" id="formDbName">
+                            <input type="hidden" name="dbUsername" id="formDbUsername">
+                            <input type="hidden" name="dbPassword" id="formDbPassword">
+                            
+                    <div class="mb-3">
+                        <label for="schemaText">CUBRID DDL 스키마</label>
+                        <textarea id="schemaText" name="schemaText" required></textarea>
+                    </div>
+                            
+                    <div class="grid grid-3">
+                        <div>
+                            <label for="recordCount">레코드 수</label>
+                            <input type="number" id="recordCount" name="recordCount" min="1" max="1000000" value="100000">
+                        </div>
+                        <div>
+                            <label>DB INSERT</label>
+                            <div style="margin-top:8px">
+                                <input type="checkbox" id="insertToDatabase" name="insertToDatabase" value="true"> <span class="muted">실제 DB에 저장</span>
+                            </div>
+                        </div>
+                        <div>
+                            <label>CUBRID 버전</label>
+                            <div style="margin-top:8px">
+                                <input type="checkbox" id="cubridVersion112" name="cubridVersion112" value="true"> <span class="muted">11.2 이상</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="spacer"></div>
+                    <button type="submit" class="btn btn-primary">가짜 데이터 생성</button>
+                        </form>
+                    </div>
+                </div>
+                
+                <div class="muted" style="margin-top:14px">CREATE/ALTER CLASS 중심의 DDL을 지원합니다.</div>
+            </div>
+        </div>
+    </div>
+    <script>
+        function addDbInfoToForm(form) {
+            // 데이터베이스 연결 정보를 폼에 추가
+            const dbHost = document.getElementById('dbHost').value;
+            const dbPort = document.getElementById('dbPort').value;
+            const dbName = document.getElementById('dbName').value;
+            const dbUsername = document.getElementById('dbUsername').value;
+            const dbPassword = document.getElementById('dbPassword').value;
+            const insertToDatabase = document.getElementById('insertToDatabase').checked;
+            
+            console.log('폼 제출 시 데이터베이스 정보:');
+            console.log('dbHost:', dbHost);
+            console.log('dbPort:', dbPort);
+            console.log('dbName:', dbName);
+            console.log('dbUsername:', dbUsername);
+            console.log('dbPassword:', dbPassword ? '***' : 'null');
+            console.log('insertToDatabase:', insertToDatabase);
+            
+            document.getElementById('formDbHost').value = dbHost;
+            document.getElementById('formDbPort').value = dbPort;
+            document.getElementById('formDbName').value = dbName;
+            document.getElementById('formDbUsername').value = dbUsername;
+            document.getElementById('formDbPassword').value = dbPassword;
+            
+            return true;
+        }
+        
+        function testConnection() {
+            const formData = new FormData();
+            formData.append('dbHost', document.getElementById('dbHost').value);
+            formData.append('dbPort', document.getElementById('dbPort').value);
+            formData.append('dbName', document.getElementById('dbName').value);
+            formData.append('dbUsername', document.getElementById('dbUsername').value);
+            formData.append('dbPassword', document.getElementById('dbPassword').value);
+            
+            // 버튼 비활성화
+            const testBtn = document.querySelector('button[onclick="testConnection()"]');
+            testBtn.disabled = true;
+            testBtn.innerHTML = '🔄 테스트 중...';
+            
+            fetch('/test-connection', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                const alertClass = data.success ? 'alert-success' : 'alert-danger';
+                const alertHtml = `<div class="alert ${alertClass} alert-dismissible fade show" role="alert">
+                    ${data.message}
+                    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                </div>`;
+                
+                // 기존 알림 제거
+                const existingAlert = document.querySelector('.card-body .alert');
+                if (existingAlert) {
+                    existingAlert.remove();
+                }
+                
+                // 새 알림 추가
+                document.querySelector('.card-body').insertAdjacentHTML('afterbegin', alertHtml);
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                const alertHtml = `<div class="alert alert-danger alert-dismissible fade show" role="alert">
+                    연결 테스트 중 오류가 발생했습니다.
+                    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                </div>`;
+                
+                const existingAlert = document.querySelector('.card-body .alert');
+                if (existingAlert) {
+                    existingAlert.remove();
+                }
+                
+                document.querySelector('.card-body').insertAdjacentHTML('afterbegin', alertHtml);
+            })
+            .finally(() => {
+                // 버튼 다시 활성화
+                testBtn.disabled = false;
+                testBtn.innerHTML = '🔍 연결 테스트';
+            });
+        }
+    </script>
+</body>
+</html>

@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="ko" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fake Data Generator - 결과</title>
+    <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+    <div class="container-narrow">
+        <div class="brand" style="margin-bottom:18px;"><span class="muted">결과</span></div>
+        
+        <div th:if="${error}" class="panel" style="border-color:#c25b5b">
+            <div class="panel-header">오류</div>
+            <div class="panel-body" th:text="${error}"></div>
+        </div>
+
+        <div th:unless="${error}">
+            <div class="panel" style="margin-bottom:16px;">
+                <div class="panel-header">요약</div>
+                <div class="panel-body">
+                    <div class="summary">
+                        <div class="item"><div class="k">테이블 수</div><div class="v" th:text="${#lists.size(tables)}">0</div></div>
+                        <div class="item"><div class="k">레코드 수</div><div class="v" th:text="${recordCount}">0</div></div>
+                        <div class="item" th:if="${insertToDatabase}"><div class="k">INSERT</div><div class="v" th:text="${totalInserted}">0</div></div>
+                        <div class="item" th:unless="${insertToDatabase}"><div class="k">모드</div><div class="v">생성만</div></div>
+                    </div>
+                    <div th:if="${warnings}" style="margin-top:12px">
+                        <span class="badge warn">경고 <span th:text="${#lists.size(warnings)}">0</span></span>
+                    </div>
+                </div>
+            </div>
+
+                <!-- 테이블별 결과 -->
+            <div th:each="table : ${tables}" class="panel" style="margin-bottom:16px;">
+                <div class="panel-header">
+                    <div>
+                        <strong th:text="${table.name}">table_name</strong>
+                        <span class="badge">컬럼 <span th:text="${#lists.size(table.columns)}">0</span></span>
+                    </div>
+                </div>
+                <div class="panel-body">
+                        <!-- 테이블 구조 -->
+                    <div class="mb-2">
+                        <div class="table-wrap">
+                            <table>
+                                <thead>
+                                    <tr><th>컬럼명</th><th>타입</th><th>제약</th></tr>
+                                </thead>
+                                <tbody>
+                                    <tr th:each="column : ${table.columns}">
+                                        <td th:text="${column.name}">column</td>
+                                        <td th:text="${column.dataType}">type</td>
+                                        <td>
+                                            <span th:if="${column.isPrimaryKey()}" class="badge">PK</span>
+                                            <span th:if="${column.isAutoIncrement()}" class="badge success">AUTO</span>
+                                        </td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                        <!-- 외래키 정보 -->
+                    <div th:if="${#lists.size(table.foreignKeys) > 0}" class="muted" style="margin:8px 0 12px">외래키
+                        <span th:each="fk : ${table.foreignKeys}" class="badge" style="margin-left:6px">
+                            <span th:text="${fk.columnName}">col</span> → <span th:text="${fk.referencedTableName}">T</span>.<span th:text="${fk.referencedColumnName}">C</span>
+                        </span>
+                    </div>
+
+                        <!-- 생성된 가짜 데이터 -->
+                    <div>
+                        <div class="table-wrap">
+                            <table>
+                                <thead>
+                                    <tr><th th:each="column : ${table.columns}" th:text="${column.name}">column</th></tr>
+                                </thead>
+                                <tbody>
+                                    <tr th:each="record : ${fakeData[table.name]}">
+                                        <td th:each="column : ${table.columns}" th:text="${record[column.name]}">value</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+                <!-- 원본 스키마 -->
+            <div class="panel">
+                <div class="panel-header">원본 스키마</div>
+                <div class="panel-body">
+                    <div style="background:#0e121a;border:1px solid rgba(255,255,255,.06);border-radius:12px;padding:12px;max-height:220px;overflow:auto;font-family:ui-monospace,Consolas,monospace;font-size:.85rem" th:text="${schemaText}">schema_text</div>
+                </div>
+            </div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>
