@@ -121,14 +121,18 @@ public class BasicValueGenerator {
     }
 
     protected boolean hasUniqueConstraint(Table table, String columnName) {
-
         // 테이블의 제약조건 중에서 해당 컬럼에 UNIQUE 제약조건이 있는지 확인
+        String columnNameLower = columnName.toLowerCase();
         for (Constraint constraint : table.getConstraints()) {
-
             // UNIQUE 제약조건만 확인 (PRIMARY KEY는 별도로 확인)
-            if (constraint.getType() == Constraint.ConstraintType.UNIQUE &&
-                    constraint.getColumns().contains(columnName)) {
-                return true;
+            if (constraint.getType() == Constraint.ConstraintType.UNIQUE) {
+                for (String constraintColumn : constraint.getColumns()) {
+                    // 대소문자 구분 없이 비교
+                    if (constraintColumn.equalsIgnoreCase(columnName) || 
+                        constraintColumn.toLowerCase().equals(columnNameLower)) {
+                        return true;
+                    }
+                }
             }
         }
         return false;
