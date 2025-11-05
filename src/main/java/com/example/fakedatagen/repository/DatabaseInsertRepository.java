@@ -171,10 +171,9 @@ public class DatabaseInsertRepository {
         StringBuilder sqlBuilder = new StringBuilder();
         sqlBuilder.append("INSERT INTO ").append(tableName).append(" (");
         
-        // 컬럼명 추가 (AUTO_INCREMENT 제외)
         for (int i = 0; i < columnNames.size(); i++) {
             if (i > 0) sqlBuilder.append(", ");
-            sqlBuilder.append(columnNames.get(i));
+            sqlBuilder.append("[").append(columnNames.get(i)).append("]");
         }
         sqlBuilder.append(") VALUES (");
         
@@ -372,11 +371,10 @@ public class DatabaseInsertRepository {
         if (columnNames.isEmpty()) {
             // AUTO_INCREMENT 컬럼만 있는 경우 - CUBRID에서는 DEFAULT VALUES 대신 명시적 컬럼 지정
             if (!autoIncrementColumns.isEmpty()) {
-                // AUTO_INCREMENT 컬럼이 있으면 해당 컬럼을 명시적으로 지정
                 sqlBuilder.append(" (");
                 for (int i = 0; i < autoIncrementColumns.size(); i++) {
                     if (i > 0) sqlBuilder.append(", ");
-                    sqlBuilder.append(autoIncrementColumns.get(i));
+                    sqlBuilder.append("[").append(autoIncrementColumns.get(i)).append("]");
                 }
                 sqlBuilder.append(") VALUES (");
                 for (int i = 0; i < autoIncrementColumns.size(); i++) {
@@ -390,10 +388,9 @@ public class DatabaseInsertRepository {
             }
         } else {
             sqlBuilder.append(" (");
-            // 컬럼명 추가
             for (int i = 0; i < finalColumnNames.size(); i++) {
                 if (i > 0) sqlBuilder.append(", ");
-                sqlBuilder.append(finalColumnNames.get(i));
+                sqlBuilder.append("[").append(finalColumnNames.get(i)).append("]");
             }
             sqlBuilder.append(") VALUES (");
             
@@ -431,7 +428,7 @@ public class DatabaseInsertRepository {
                             } else {
                                 // 드라이버가 키 반환을 제공하지 않으면 보정: MAX 조회
                                 try {
-                                    String maxIdSql = "SELECT COALESCE(MAX(" + autoIncrementColumns.get(0) + "), 0) FROM " + tableName;
+                                    String maxIdSql = "SELECT COALESCE(MAX([" + autoIncrementColumns.get(0) + "]), 0) FROM " + tableName;
                                     Long maxId = jdbcTemplate.queryForObject(maxIdSql, Long.class);
                                     generatedKeys.add(maxId);
                                 } catch (Exception ex) {
@@ -483,7 +480,7 @@ public class DatabaseInsertRepository {
         List<Object> actualData = new ArrayList<>();
         
         try {
-            String sql = "SELECT " + columnName + " FROM " + tableName + " ORDER BY " + columnName;
+            String sql = "SELECT [" + columnName + "] FROM " + tableName + " ORDER BY [" + columnName + "]";
             List<Map<String, Object>> results = jdbcTemplate.queryForList(sql);
             
             for (Map<String, Object> row : results) {
