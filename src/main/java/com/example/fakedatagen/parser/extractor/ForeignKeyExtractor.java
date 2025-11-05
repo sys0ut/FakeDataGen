@@ -25,19 +25,23 @@ public class ForeignKeyExtractor {
      * @return 테이블별 FOREIGN KEY 맵 (key: schema.table, value: FK 리스트)
      */
     public Map<String, List<ForeignKey>> extract(String schemaText, boolean keepSchemaName, Map<String, List<String>> pkMap) {
+        // 여러 줄에 걸친 외래키 정의도 처리 (DOTALL 사용)
+        // WITH DEDUPLICATE=0이 있을 수도 있고 없을 수도 있음
+        // [^\\]]+를 사용하여 대괄호 안의 내용만 정확히 매칭
         Pattern fkPattern = Pattern.compile(
-                "ALTER\\s+CLASS\\s+\\[(.*?)\\]\\.\\[(.*?)\\]\\s+ADD\\s+CONSTRAINT\\s+\\[(.*?)\\]\\s+FOREIGN\\s+KEY\\s*\\(([^)]*)\\).*?REFERENCES\\s+\\[(.*?)\\]\\.\\[(.*?)\\]",
-                Pattern.CASE_INSENSITIVE);
+                "ALTER\\s+CLASS\\s+\\[([^\\]]+)\\]\\.\\[([^\\]]+)\\]\\s+ADD\\s+CONSTRAINT\\s+\\[([^\\]]+)\\]\\s+FOREIGN\\s+KEY\\s*\\(([^)]+)\\)(?:\\s+WITH\\s+DEDUPLICATE\\s*=\\s*\\d+)?\\s*REFERENCES\\s+\\[([^\\]]+)\\]\\.\\[([^\\]]+)\\]",
+                Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
         Matcher fkMatcher = fkPattern.matcher(schemaText);
         
         Map<String, List<ForeignKey>> fkMap = new HashMap<>();
         
         while (fkMatcher.find()) {
-            String schemaName = fkMatcher.group(1).toLowerCase();
-            String tableName = fkMatcher.group(2).toLowerCase();
-            String fkColumnsRaw = fkMatcher.group(4).replaceAll("\\[|\\]", "");
-            String refSchemaName = fkMatcher.group(5).toLowerCase();
-            String refTable = fkMatcher.group(6).toLowerCase();
+            String schemaName = fkMatcher.group(1).trim().toLowerCase();
+            String tableName = fkMatcher.group(2).trim().toLowerCase();
+            String constraintName = fkMatcher.group(3).trim();
+            String fkColumnsRaw = fkMatcher.group(4).trim();
+            String refSchemaName = fkMatcher.group(5).trim().toLowerCase();
+            String refTable = fkMatcher.group(6).trim().toLowerCase();
             
             String key;
             String referencedTableName;
@@ -49,7 +53,8 @@ public class ForeignKeyExtractor {
                 referencedTableName = refTable;
             }
             
-            String fkColumnName = fkColumnsRaw.trim().toLowerCase();
+            // 컬럼명 추출: [column_name] 형태에서 대괄호 제거
+            String fkColumnName = fkColumnsRaw.replaceAll("\\[|\\]", "").trim().toLowerCase();
             
             // 참조되는 테이블의 기본키 컬럼명 찾기
             String referencedColumnName = findReferencedPrimaryKeyColumn(refSchemaName, refTable, fkColumnName, pkMap, keepSchemaName);
