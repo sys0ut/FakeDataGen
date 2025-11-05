@@ -31,6 +31,23 @@ public class DatabaseInsertRepository {
     private JdbcTemplate jdbcTemplate;
     
     /**
+     * dataType 문자열에서 maxLength 추출
+     * 예: "character varying(2)" -> 2, "varchar(30)" -> 30
+     */
+    private int extractMaxLengthFromDataType(String dataType) {
+        try {
+            java.util.regex.Pattern pattern = java.util.regex.Pattern.compile("\\((\\d+)\\)");
+            java.util.regex.Matcher matcher = pattern.matcher(dataType);
+            if (matcher.find()) {
+                return Integer.parseInt(matcher.group(1));
+            }
+        } catch (Exception e) {
+            // 파싱 실패시 0 반환
+        }
+        return 0;
+    }
+    
+    /**
      * 컬럼 타입에 맞게 값을 적절한 Java 타입으로 변환
      */
     private Object convertValueByColumnType(Object value, Column column) {
@@ -114,8 +131,23 @@ public class DatabaseInsertRepository {
             }
             // 문자열 타입 및 기타 (VARCHAR, CHAR, STRING, TEXT, BIT 등)
             else {
-                // BIT 타입도 CUBRID에서는 문자열로 처리
-                return value.toString();
+                String strValue = value.toString();
+                
+                // maxLength가 있는 경우 길이 제한 적용 (character varying(n), char(n) 등)
+                // Column 객체의 maxLength가 설정되지 않은 경우 dataType 문자열에서 직접 추출
+                int maxLength = column.getMaxLength();
+                if (maxLength <= 0) {
+                    // dataType에서 직접 maxLength 추출 (예: "character varying(2)" -> 2)
+                    maxLength = extractMaxLengthFromDataType(dataType);
+                }
+                
+                if (maxLength > 0 && strValue.length() > maxLength) {
+                    log.warn("문자열 길이 초과 자름: column={}, maxLength={}, 원본길이={}, 원본값={}, 잘린값={}", 
+                            column.getName(), maxLength, strValue.length(), strValue, strValue.substring(0, maxLength));
+                    return strValue.substring(0, maxLength);
+                }
+                
+                return strValue;
             }
         } catch (Exception e) {
             log.warn("값 변환 실패 - column={}, type={}, value={}, error={}", 
@@ -235,7 +267,18 @@ public class DatabaseInsertRepository {
                             Column column = table.getColumnByName(columnName);
                             Object value = record.get(columnName);
                             Object convertedValue = (column != null) ? convertValueByColumnType(value, column) : value;
-                            ps.setObject(i + 1, convertedValue);
+                            try {
+                                ps.setObject(i + 1, convertedValue);
+                            } catch (Exception e) {
+                                log.error("ps.setObject 실패 (배치) - table={}, column={}, index={}, value={}, valueType={}, converted={}, convertedType={}, columnDataType={}, error={}", 
+                                        tableName, columnName, i + 1, value,
+                                        value != null ? value.getClass().getSimpleName() : "null",
+                                        convertedValue,
+                                        convertedValue != null ? convertedValue.getClass().getSimpleName() : "null",
+                                        column != null ? column.getDataType() : "null",
+                                        e.getMessage());
+                                throw e;
+                            }
                         }
                     });
                     
@@ -413,15 +456,64 @@ public class DatabaseInsertRepository {
                 try (PreparedStatement ps = conn.prepareStatement(sql, java.sql.Statement.RETURN_GENERATED_KEYS)) {
                     for (Map<String, Object> record : records) {
                         if (!finalColumnNames.isEmpty()) {
+                            // address 테이블인 경우 INSERT 전 모든 컬럼 값 로깅
+                            if (tableName.contains("address")) {
+                                log.warn("address INSERT 직전 - 컬럼 정보:");
+                                for (int j = 0; j < finalColumnNames.size(); j++) {
+                                    String columnName = finalColumnNames.get(j);
+                                    Column column = table.getColumnByName(columnName);
+                                    Object value = record.get(columnName);
+                                    Object convertedValue = (column != null) ? convertValueByColumnType(value, column) : value;
+                                    log.warn("  [{}] value={}, valueType={}, converted={}, convertedType={}, columnDataType={}, maxLength={}", 
+                                            columnName, value,
+                                            value != null ? value.getClass().getSimpleName() : "null",
+                                            convertedValue,
+                                            convertedValue != null ? convertedValue.getClass().getSimpleName() : "null",
+                                            column != null ? column.getDataType() : "null",
+                                            column != null ? column.getMaxLength() : -1);
+                                }
+                            }
+                            
                             for (int j = 0; j < finalColumnNames.size(); j++) {
                                 String columnName = finalColumnNames.get(j);
                                 Column column = table.getColumnByName(columnName);
                                 Object value = record.get(columnName);
                                 Object convertedValue = (column != null) ? convertValueByColumnType(value, column) : value;
-                                ps.setObject(j + 1, convertedValue);
+                                try {
+                                    ps.setObject(j + 1, convertedValue);
+                                } catch (Exception e) {
+                                    log.error("ps.setObject 실패 - table={}, column={}, index={}, value={}, valueType={}, converted={}, convertedType={}, columnDataType={}, error={}", 
+                                            tableName, columnName, j + 1, value,
+                                            value != null ? value.getClass().getSimpleName() : "null",
+                                            convertedValue,
+                                            convertedValue != null ? convertedValue.getClass().getSimpleName() : "null",
+                                            column != null ? column.getDataType() : "null",
+                                            e.getMessage());
+                                    throw e;
+                                }
                             }
                         }
-                        ps.executeUpdate();
+                        try {
+                            ps.executeUpdate();
+                        } catch (Exception e) {
+                            if (tableName.contains("address")) {
+                                log.error("address executeUpdate 실패 - 모든 컬럼 값:");
+                                for (int j = 0; j < finalColumnNames.size(); j++) {
+                                    String columnName = finalColumnNames.get(j);
+                                    Column column = table.getColumnByName(columnName);
+                                    Object value = record.get(columnName);
+                                    Object convertedValue = (column != null) ? convertValueByColumnType(value, column) : value;
+                                    log.error("  [{}] value={}, valueType={}, converted={}, convertedType={}, columnDataType={}, maxLength={}", 
+                                            columnName, value,
+                                            value != null ? value.getClass().getSimpleName() : "null",
+                                            convertedValue,
+                                            convertedValue != null ? convertedValue.getClass().getSimpleName() : "null",
+                                            column != null ? column.getDataType() : "null",
+                                            column != null ? column.getMaxLength() : -1);
+                                }
+                            }
+                            throw e;
+                        }
                         try (java.sql.ResultSet rs = ps.getGeneratedKeys()) {
                             if (rs.next()) {
                                 generatedKeys.add(rs.getLong(1));
