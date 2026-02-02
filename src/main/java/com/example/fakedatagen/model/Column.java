@@ -14,21 +14,12 @@ public class Column {
         this.dataType = dataType;
     }
 
-    // getter, setter
     public String getName() {
         return name;
     }
 
-    public void setName(String name) {
-        this.name = name;
-    }
-
     public String getDataType() {
         return dataType;
-    }
-
-    public void setDataType(String dataType) {
-        this.dataType = dataType;
     }
 
     public boolean isPrimaryKey() {
@@ -51,30 +42,7 @@ public class Column {
         return isNullable;
     }
 
-    public void setNullable(boolean nullable) {
-        isNullable = nullable;
-    }
-
-    public String getDefaultValue() {
-        return defaultValue;
-    }
-
-    public void setDefaultValue(String defaultValue) {
-        this.defaultValue = defaultValue;
-    }
-
     public int getMaxLength() {
         return maxLength;
-    }
-
-    public void setMaxLength(int maxLength) {
-        this.maxLength = maxLength;
-    }
-
-    public String getFullDataType() {
-        if (maxLength > 0 && dataType.toLowerCase().contains("varchar")) {
-            return dataType + "(" + maxLength + ")";
-        }
-        return dataType;
     }
 }

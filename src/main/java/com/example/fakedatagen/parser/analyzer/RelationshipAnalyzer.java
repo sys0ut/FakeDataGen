@@ -1,6 +1,8 @@
 package com.example.fakedatagen.parser.analyzer;
 
 import com.example.fakedatagen.model.*;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 /**
@@ -8,6 +10,8 @@ import org.springframework.stereotype.Component;
  */
 @Component
 public class RelationshipAnalyzer {
+    
+    private static final Logger log = LoggerFactory.getLogger(RelationshipAnalyzer.class);
     
     /**
      * 스키마의 관계와 의존성을 분석
@@ -17,29 +21,30 @@ public class RelationshipAnalyzer {
     public void analyze(DatabaseSchema schema) {
         for (Table table : schema.getTables()) {
             for (ForeignKey fk : table.getForeignKeys()) {
-                // 외래키의 참조 테이블 찾기
-                Table referencedTable = schema.getTables().stream()
-                        .filter(t -> t.getName().equalsIgnoreCase(fk.getReferencedTableName()))
-                        .findFirst()
-                        .orElse(null);
+                Table referencedTable = findReferencedTable(schema, fk.getReferencedTableName());
 
                 if (referencedTable != null) {
-                    // 의존성 추가
                     schema.addDependency(table.getName(), referencedTable.getName());
 
-                    // 관계 타입 자동 감지
                     Relationship.RelationshipType relationshipType = determineRelationshipType(table, referencedTable, fk, schema);
                     
-                    // 관계 생성
-                    Relationship relationship = new Relationship(
-                            table, referencedTable, relationshipType
-                    );
+                    Relationship relationship = new Relationship(table, referencedTable, relationshipType);
                     relationship.addSourceColumn(fk.getColumnName());
                     relationship.addTargetColumn(fk.getReferencedColumnName());
                     schema.addRelationship(relationship);
+                    
+                    log.debug("Relationship: {} -> {} ({})", table.getName(), referencedTable.getName(), relationshipType);
                 }
             }
         }
+        log.debug("Total {} dependency relationships created", schema.getDependencies().size());
+    }
+    
+    private Table findReferencedTable(DatabaseSchema schema, String referencedTableName) {
+        return schema.getTables().stream()
+                .filter(t -> t.getName().equalsIgnoreCase(referencedTableName))
+                .findFirst()
+                .orElse(null);
     }
     
     /**

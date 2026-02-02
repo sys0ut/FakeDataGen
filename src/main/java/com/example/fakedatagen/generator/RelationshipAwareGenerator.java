@@ -2,12 +2,16 @@ package com.example.fakedatagen.generator;
 
 import com.example.fakedatagen.model.*;
 import net.datafaker.Faker;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.util.*;
 
 @Service
 public class RelationshipAwareGenerator {
+
+    private static final Logger log = LoggerFactory.getLogger(RelationshipAwareGenerator.class);
 
     private final TopologicalSorter topologicalSorter;
     private final BasicValueGenerator basicValueGenerator;
@@ -30,29 +34,71 @@ public class RelationshipAwareGenerator {
     }
     
     public Map<String, List<Map<String, Object>>> generateFakeData(DatabaseSchema schema, int recordCount) {
-        Map<String, List<Map<String, Object>>> fakeData = new HashMap<>();
+        int initialCapacity = Math.max(schema.getTables().size(), 16);
+        Map<String, List<Map<String, Object>>> fakeData = new HashMap<>(initialCapacity);
         
-        // 1단계: 의존성 순서에 따라 테이블 생성
+        log.debug("Determining table generation order using topological sort");
         List<Table> orderedTables = topologicalSorter.getOrderedTables(schema);
+        log.debug("Table generation order: {}", orderedTables.stream().map(Table::getName).toList());
         
         for (Table table : orderedTables) {
-            List<Map<String, Object>> records = new ArrayList<>();
-            
-            for (int i = 0; i < recordCount; i++) {
-                Map<String, Object> record = new HashMap<>();
-                
-                for (Column column : table.getColumns()) {
-                    Object value = generateValueForColumn(column, i, table, fakeData, schema);
-                    record.put(column.getName(), value);
-                }
-                
-                records.add(record);
-            }
-            
+            log.debug("Generating data for table: {} ({} records)", table.getName(), recordCount);
+            List<Map<String, Object>> records = generateTableRecords(table, recordCount, fakeData, schema);
             fakeData.put(table.getName(), records);
+            log.debug("Generated {} records for table: {}", records.size(), table.getName());
         }
         
         return fakeData;
+    }
+    
+    private List<Map<String, Object>> generateTableRecords(Table table, int recordCount, 
+                                                           Map<String, List<Map<String, Object>>> fakeData, 
+                                                           DatabaseSchema schema) {
+        // 관계 정보를 미리 계산
+        List<Relationship> relationships = getRelationshipsForTable(table.getName(), schema);
+        Map<String, Relationship> columnToRelationship = new HashMap<>();
+        for (Relationship rel : relationships) {
+            for (String col : rel.getSourceColumns()) {
+                columnToRelationship.put(col, rel);
+            }
+        }
+        
+        Map<String, ForeignKey> columnToForeignKey = new HashMap<>();
+        for (ForeignKey fk : table.getForeignKeys()) {
+            columnToForeignKey.put(fk.getColumnName(), fk);
+        }
+        
+        List<Map<String, Object>> records = new ArrayList<>(recordCount);
+        for (int i = 0; i < recordCount; i++) {
+            Map<String, Object> record = new HashMap<>();
+            for (Column column : table.getColumns()) {
+                Object value = generateValueForColumnOptimized(column, i, table, fakeData, schema, 
+                                                               columnToRelationship, columnToForeignKey);
+                record.put(column.getName(), value);
+            }
+            records.add(record);
+        }
+        return records;
+    }
+    
+    private Object generateValueForColumnOptimized(Column column, int index, Table table, 
+                                                   Map<String, List<Map<String, Object>>> fakeData, 
+                                                   DatabaseSchema schema,
+                                                   Map<String, Relationship> columnToRelationship,
+                                                   Map<String, ForeignKey> columnToForeignKey) {
+        // 관계 체크 (캐시된 맵 사용)
+        Relationship relationship = columnToRelationship.get(column.getName());
+        if (relationship != null) {
+            return relationshipValueGenerator.generateFromFakeData(relationship, column.getName(), index, fakeData);
+        }
+        
+        // 외래키 체크 (캐시된 맵 사용)
+        ForeignKey fk = columnToForeignKey.get(column.getName());
+        if (fk != null) {
+            return foreignKeyValueGenerator.generateFromFakeData(fk, fakeData, index);
+        }
+        
+        return basicValueGenerator.generate(column, index, table);
     }
     
     /**
@@ -65,12 +111,10 @@ public class RelationshipAwareGenerator {
      * @return 생성된 테이블 데이터
      */
     public List<Map<String, Object>> generateTableData(DatabaseSchema schema, String tableName, int recordCount, Map<String, List<Long>> generatedKeysMap) {
-        // 전체 테이블명에서 스키마명 제거하여 테이블 찾기
-        String tableNameOnly = tableName.contains(".") ? 
-            tableName.substring(tableName.lastIndexOf(".") + 1) : tableName;
-        
+        String tableNameOnly = extractTableNameOnly(tableName);
         Table table = schema.getTableByName(tableNameOnly);
         if (table == null) {
+            log.warn("Table not found in schema: {}", tableNameOnly);
             return new ArrayList<>();
         }
         
@@ -103,54 +147,88 @@ public class RelationshipAwareGenerator {
     public List<Map<String, Object>> generateTableDataWithGeneratedData(DatabaseSchema schema, String tableName, int recordCount, 
                                                                        Map<String, List<Long>> generatedKeysMap, 
                                                                        Map<String, List<Map<String, Object>>> generatedDataMap) {
-        // 전체 테이블명에서 스키마명 제거하여 테이블 찾기
-        // 굳이 스키마명 제거 할 필요가 없음 -> 추후 수정
-        String tableNameOnly = tableName.contains(".") ? 
-            tableName.substring(tableName.lastIndexOf(".") + 1) : tableName;
-        
+        String tableNameOnly = extractTableNameOnly(tableName);
         Table table = schema.getTableByName(tableNameOnly);
         if (table == null) {
+            log.warn("Table not found in schema: {}", tableNameOnly);
             return new ArrayList<>();
         }
         
-        List<Map<String, Object>> records = new ArrayList<>();
+        log.debug("Generating data for table: {} ({} records)", tableName, recordCount);
+        
+        // 관계 정보를 미리 계산 (성능 최적화)
+        List<Relationship> relationships = getRelationshipsForTable(table.getName(), schema);
+        Map<String, Relationship> columnToRelationship = new HashMap<>();
+        for (Relationship rel : relationships) {
+            for (String col : rel.getSourceColumns()) {
+                columnToRelationship.put(col, rel);
+            }
+        }
+        
+        Map<String, ForeignKey> columnToForeignKey = new HashMap<>();
+        for (ForeignKey fk : table.getForeignKeys()) {
+            columnToForeignKey.put(fk.getColumnName(), fk);
+        }
+        
+        List<Map<String, Object>> records = new ArrayList<>(recordCount);
         
         for (int i = 0; i < recordCount; i++) {
             Map<String, Object> record = new HashMap<>();
-            
             for (Column column : table.getColumns()) {
-                Object value = generateValueForColumnWithGeneratedData(column, i, table, generatedKeysMap, generatedDataMap, schema);
+                Object value = generateValueForColumnWithGeneratedDataOptimized(column, i, table, generatedKeysMap, 
+                                                                               generatedDataMap, schema,
+                                                                               columnToRelationship, columnToForeignKey);
                 record.put(column.getName(), value);
             }
-            
             records.add(record);
         }
         
-        // 테이블 데이터 생성 완료 후 Faker 타입 매핑 정보 로그 출력 (1번만)
         basicValueGenerator.logTableFakerMappings(tableNameOnly);
+        log.debug("Generated {} records for table: {}", records.size(), tableName);
         
         return records;
     }
     
-    private Object generateValueForColumn(Column column, int index, Table table, Map<String, List<Map<String, Object>>> fakeData, DatabaseSchema schema) {
-
-        // 해당 기준 수정 필요
-
-        // 1. Relationship 기반 처리 (우선순위 높음)
-        for (Relationship relationship : getRelationshipsForTable(table.getName(), schema)) {
+    private Object generateValueForColumnWithGeneratedDataOptimized(Column column, int index, Table table, 
+                                                                    Map<String, List<Long>> generatedKeysMap, 
+                                                                    Map<String, List<Map<String, Object>>> generatedDataMap, 
+                                                                    DatabaseSchema schema,
+                                                                    Map<String, Relationship> columnToRelationship,
+                                                                    Map<String, ForeignKey> columnToForeignKey) {
+        // 관계 체크 (캐시된 맵 사용)
+        Relationship relationship = columnToRelationship.get(column.getName());
+        if (relationship != null) {
+            return relationshipValueGenerator.generateFromData(relationship, column.getName(), index, generatedKeysMap, generatedDataMap);
+        }
+        
+        // 외래키 체크 (캐시된 맵 사용)
+        ForeignKey fk = columnToForeignKey.get(column.getName());
+        if (fk != null) {
+            return foreignKeyValueGenerator.generateFromData(fk, generatedKeysMap, generatedDataMap, index);
+        }
+        
+        return basicValueGenerator.generate(column, index, table);
+    }
+    
+    private String extractTableNameOnly(String tableName) {
+        return tableName.contains(".") ? tableName.substring(tableName.lastIndexOf(".") + 1) : tableName;
+    }
+    
+    private Object generateValueForColumn(Column column, int index, Table table, 
+                                         Map<String, List<Map<String, Object>>> fakeData, DatabaseSchema schema) {
+        List<Relationship> relationships = getRelationshipsForTable(table.getName(), schema);
+        for (Relationship relationship : relationships) {
             if (relationship.getSourceColumns().contains(column.getName())) {
                 return relationshipValueGenerator.generateFromFakeData(relationship, column.getName(), index, fakeData);
             }
         }
         
-        // 2. Foreign Key 기반 처리
         for (ForeignKey fk : table.getForeignKeys()) {
             if (fk.getColumnName().equals(column.getName())) {
                 return foreignKeyValueGenerator.generateFromFakeData(fk, fakeData, index);
             }
         }
         
-        // 3. 기본 데이터 타입 처리
         return basicValueGenerator.generate(column, index, table);
     }
     
@@ -161,60 +239,44 @@ public class RelationshipAwareGenerator {
                                                           Map<String, List<Long>> generatedKeysMap, 
                                                           Map<String, List<Map<String, Object>>> generatedDataMap, 
                                                           DatabaseSchema schema) {
-        
-        // 1. Relationship 기반 처리 (우선순위 높음)
-        for (Relationship relationship : getRelationshipsForTable(table.getName(), schema)) {
+        List<Relationship> relationships = getRelationshipsForTable(table.getName(), schema);
+        for (Relationship relationship : relationships) {
             if (relationship.getSourceColumns().contains(column.getName())) {
                 return relationshipValueGenerator.generateFromData(relationship, column.getName(), index, generatedKeysMap, generatedDataMap);
             }
         }
         
-        // 2. Foreign Key 기반 처리
         for (ForeignKey fk : table.getForeignKeys()) {
             if (fk.getColumnName().equals(column.getName())) {
-                Object fkValue = foreignKeyValueGenerator.generateFromData(fk, generatedKeysMap, generatedDataMap, index);
-                return fkValue;
+                return foreignKeyValueGenerator.generateFromData(fk, generatedKeysMap, generatedDataMap, index);
             }
         }
         
-        // 3. 기본 데이터 타입 처리
         return basicValueGenerator.generate(column, index, table);
     }
     
-    /**
-     * 실제 생성된 키 값을 사용하여 컬럼 값을 생성
-     */
-    private Object generateValueForColumnWithGeneratedKeys(Column column, int index, Table table, Map<String, List<Long>> generatedKeysMap, DatabaseSchema schema) {
-        
-        // 1. Relationship 기반 처리 (우선순위 높음)
-        for (Relationship relationship : getRelationshipsForTable(table.getName(), schema)) {
+    private Object generateValueForColumnWithGeneratedKeys(Column column, int index, Table table, 
+                                                           Map<String, List<Long>> generatedKeysMap, DatabaseSchema schema) {
+        List<Relationship> relationships = getRelationshipsForTable(table.getName(), schema);
+        for (Relationship relationship : relationships) {
             if (relationship.getSourceColumns().contains(column.getName())) {
                 return relationshipValueGenerator.generateFromKeys(relationship, column.getName(), index, generatedKeysMap);
             }
         }
         
-        // 2. Foreign Key 기반 처리
         for (ForeignKey fk : table.getForeignKeys()) {
             if (fk.getColumnName().equals(column.getName())) {
-                Object fkValue = foreignKeyValueGenerator.generateFromKeys(fk, generatedKeysMap, index);
-                return fkValue;
+                return foreignKeyValueGenerator.generateFromKeys(fk, generatedKeysMap, index);
             }
         }
         
-        // 3. 기본 데이터 타입 처리
         return basicValueGenerator.generate(column, index, table);
     }
 
     private List<Relationship> getRelationshipsForTable(String tableName, DatabaseSchema schema) {
+        String tableNameOnly = extractTableNameOnly(tableName);
         List<Relationship> relationships = new ArrayList<>();
         
-        // 테이블명에서 스키마명 제거
-        String tableNameOnly = tableName;
-        if (tableName.contains(".")) {
-            tableNameOnly = tableName.substring(tableName.lastIndexOf(".") + 1);
-        }
-        
-        // DatabaseSchema에서 해당 테이블과 관련된 관계들을 찾아서 반환
         for (Relationship relationship : schema.getRelationships()) {
             if (relationship.getSourceTable().getName().equals(tableNameOnly)) {
                 relationships.add(relationship);
@@ -224,22 +286,19 @@ public class RelationshipAwareGenerator {
         return relationships;
     }
 
-    /**
-     * 위상 정렬된 테이블 순서를 반환
-     * 이 순서대로 INSERT해야 외래키 제약조건을 만족
-     */
     public List<String> getOrderedTableNames(DatabaseSchema schema) {
+        log.debug("Determining table insertion order using topological sort");
         List<Table> orderedTables = topologicalSorter.getOrderedTables(schema);
         List<String> orderedTableNames = new ArrayList<>();
         
         for (Table table : orderedTables) {
-            // 스키마명이 있으면 스키마명.테이블명 형태로, 없으면 테이블명만 사용
-            String fullTableName = table.getSchemaName() != null && !table.getSchemaName().isEmpty() 
-                ? table.getSchemaName() + "." + table.getName() 
-                : table.getName();
+            String fullTableName = (table.getSchemaName() != null && !table.getSchemaName().isEmpty())
+                    ? table.getSchemaName() + "." + table.getName()
+                    : table.getName();
             orderedTableNames.add(fullTableName);
         }
         
+        log.debug("Table insertion order: {}", orderedTableNames);
         return orderedTableNames;
     }
 }

@@ -20,53 +20,20 @@ public class Constraint {
         this.type = type;
     }
 
-    // getter, setter
     public String getName() { 
         return name; 
-    }
-    
-    public void setName(String name) { 
-        this.name = name; 
     }
     
     public ConstraintType getType() { 
         return type; 
     }
-    
-    public void setType(ConstraintType type) { 
-        this.type = type; 
-    }
-    
+
     public List<String> getColumns() { 
         return columns; 
     }
     
     public void setColumns(List<String> columns) { 
         this.columns = columns; 
-    }
-    
-    public String getCheckCondition() { 
-        return checkCondition; 
-    }
-    
-    public void setCheckCondition(String checkCondition) { 
-        this.checkCondition = checkCondition; 
-    }
-    
-    public String getReferencedTable() { 
-        return referencedTable; 
-    }
-    
-    public void setReferencedTable(String referencedTable) { 
-        this.referencedTable = referencedTable; 
-    }
-    
-    public String getReferencedColumn() { 
-        return referencedColumn; 
-    }
-    
-    public void setReferencedColumn(String referencedColumn) { 
-        this.referencedColumn = referencedColumn; 
     }
     
     public void addColumn(String column) { 

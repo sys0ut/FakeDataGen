@@ -25,8 +25,41 @@
                         <div class="item" th:if="${insertToDatabase}"><div class="k">INSERT</div><div class="v" th:text="${totalInserted}">0</div></div>
                         <div class="item" th:unless="${insertToDatabase}"><div class="k">모드</div><div class="v">생성만</div></div>
                     </div>
-                    <div th:if="${warnings}" style="margin-top:12px">
-                        <span class="badge warn">경고 <span th:text="${#lists.size(warnings)}">0</span></span>
+                    <div style="margin-top:16px; padding:12px; background:#1a1a1a; border-radius:8px; border:1px solid rgba(255,255,255,.1)">
+                        <div style="font-size:0.9rem; color:#888; margin-bottom:8px">메모리 사용량</div>
+                        <div style="display:grid; grid-template-columns: 1fr 1fr; gap:12px">
+                            <div>
+                                <div style="font-size:0.85rem; color:#aaa; margin-bottom:4px">JVM 메모리 <span style="font-size:0.7rem; color:#666" id="jvmUpdateTime"></span></div>
+                                <div style="font-size:0.9rem; color:#fff">
+                                    <span id="jvmUsedMB" th:text="${memoryInfo.jvmUsedMB}">0</span> MB / 
+                                    <span id="jvmMaxMB" th:text="${memoryInfo.jvmMaxMB}">0</span> MB
+                                </div>
+                                <div style="margin-top:4px; height:4px; background:#2a2a2a; border-radius:2px; overflow:hidden">
+                                    <div id="jvmProgressBar" th:style="'width:' + ${memoryInfo.jvmUsedPercent} + '%; background:' + (${memoryInfo.jvmUsedPercent} > 80 ? '#ff6b6b' : (${memoryInfo.jvmUsedPercent} > 60 ? '#ffa500' : '#4ecdc4')) + '; height:100%'"></div>
+                                </div>
+                                <div style="font-size:0.75rem; color:#888; margin-top:2px" id="jvmPercent" th:text="${#numbers.formatDecimal(memoryInfo.jvmUsedPercent, 1, 1)} + '%'">0%</div>
+                            </div>
+                            <div>
+                                <div style="font-size:0.85rem; color:#aaa; margin-bottom:4px">시스템 메모리 <span style="font-size:0.7rem; color:#666" id="systemUpdateTime"></span></div>
+                                <div style="font-size:0.9rem; color:#fff" id="systemMemoryInfo" th:if="${memoryInfo.systemTotalMB > 0}">
+                                    <span id="systemUsedMB" th:text="${memoryInfo.systemUsedMB}">0</span> MB / 
+                                    <span id="systemTotalMB" th:text="${memoryInfo.systemTotalMB}">0</span> MB
+                                </div>
+                                <div style="font-size:0.9rem; color:#888" id="systemMemoryInfoEmpty" th:unless="${memoryInfo.systemTotalMB > 0}">정보 없음</div>
+                                <div style="margin-top:4px; height:4px; background:#2a2a2a; border-radius:2px; overflow:hidden" id="systemProgressBarContainer" th:if="${memoryInfo.systemTotalMB > 0}">
+                                    <div id="systemProgressBar" th:style="'width:' + ${memoryInfo.systemUsedPercent} + '%; background:' + (${memoryInfo.systemUsedPercent} > 80 ? '#ff6b6b' : (${memoryInfo.systemUsedPercent} > 60 ? '#ffa500' : '#4ecdc4')) + '; height:100%'"></div>
+                                </div>
+                                <div style="font-size:0.75rem; color:#888; margin-top:2px" id="systemPercent" th:if="${memoryInfo.systemTotalMB > 0}" th:text="${#numbers.formatDecimal(memoryInfo.systemUsedPercent, 1, 1)} + '%'">0%</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div th:if="${warnings != null and #lists.size(warnings) > 0}" style="margin-top:12px">
+                        <div class="badge warn" style="margin-bottom:8px">경고 <span th:text="${#lists.size(warnings)}">0</span>개</div>
+                        <div style="margin-top:8px; padding:8px; background:#2a1f1f; border-radius:6px; font-size:0.9rem">
+                            <div th:each="warning : ${warnings}" style="margin-bottom:4px; color:#ff6b6b">
+                                • <span th:text="${warning}">warning</span>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -96,5 +129,68 @@
             </div>
         </div>
     </div>
+    
+    <script>
+        // 메모리 정보 실시간 업데이트
+        function updateMemoryInfo() {
+            fetch('/api/memory')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        const mem = data.data;
+                        
+                        // JVM 메모리 업데이트
+                        document.getElementById('jvmUsedMB').textContent = mem.jvmUsedMB;
+                        document.getElementById('jvmMaxMB').textContent = mem.jvmMaxMB;
+                        document.getElementById('jvmPercent').textContent = mem.jvmUsedPercent.toFixed(1) + '%';
+                        
+                        const jvmProgressBar = document.getElementById('jvmProgressBar');
+                        jvmProgressBar.style.width = mem.jvmUsedPercent + '%';
+                        jvmProgressBar.style.background = mem.jvmUsedPercent > 80 ? '#ff6b6b' : 
+                                                          (mem.jvmUsedPercent > 60 ? '#ffa500' : '#4ecdc4');
+                        
+                        // 시스템 메모리 업데이트
+                        if (mem.systemTotalMB > 0) {
+                            document.getElementById('systemUsedMB').textContent = mem.systemUsedMB;
+                            document.getElementById('systemTotalMB').textContent = mem.systemTotalMB;
+                            document.getElementById('systemPercent').textContent = mem.systemUsedPercent.toFixed(1) + '%';
+                            
+                            const systemProgressBar = document.getElementById('systemProgressBar');
+                            systemProgressBar.style.width = mem.systemUsedPercent + '%';
+                            systemProgressBar.style.background = mem.systemUsedPercent > 80 ? '#ff6b6b' : 
+                                                                  (mem.systemUsedPercent > 60 ? '#ffa500' : '#4ecdc4');
+                            
+                            // 시스템 메모리 정보가 없었던 경우 표시
+                            const systemInfoEmpty = document.getElementById('systemMemoryInfoEmpty');
+                            const systemInfo = document.getElementById('systemMemoryInfo');
+                            const systemProgressContainer = document.getElementById('systemProgressBarContainer');
+                            const systemPercent = document.getElementById('systemPercent');
+                            
+                            if (systemInfoEmpty && systemInfoEmpty.style.display !== 'none') {
+                                systemInfoEmpty.style.display = 'none';
+                                systemInfo.style.display = 'block';
+                                systemProgressContainer.style.display = 'block';
+                                systemPercent.style.display = 'block';
+                            }
+                        }
+                        
+                        // 업데이트 시간 표시
+                        const now = new Date();
+                        const timeStr = now.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+                        document.getElementById('jvmUpdateTime').textContent = '(' + timeStr + ')';
+                        if (mem.systemTotalMB > 0) {
+                            document.getElementById('systemUpdateTime').textContent = '(' + timeStr + ')';
+                        }
+                    }
+                })
+                .catch(error => {
+                    console.error('Failed to update memory info:', error);
+                });
+        }
+        
+        // 페이지 로드 시 즉시 업데이트하고, 이후 1초마다 업데이트
+        updateMemoryInfo();
+        setInterval(updateMemoryInfo, 1000);
+    </script>
 </body>
 </html>

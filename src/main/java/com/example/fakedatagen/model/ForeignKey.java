@@ -21,7 +21,6 @@ public class ForeignKey {
         this.referencedColumnName = referencedColumnName;
     }
 
-    // getter, setter
     public String getColumnName() {
         return columnName;
     }
@@ -34,43 +33,11 @@ public class ForeignKey {
         return referencedTableName;
     }
 
-    public void setReferencedTableName(String referencedTableName) {
-        this.referencedTableName = referencedTableName;
-    }
-
     public String getReferencedColumnName() {
         return referencedColumnName;
     }
 
-    public void setReferencedColumnName(String referencedColumnName) {
-        this.referencedColumnName = referencedColumnName;
-    }
-
     public String getConstraintName() {
         return constraintName;
-    }
-
-    public void setConstraintName(String constraintName) {
-        this.constraintName = constraintName;
-    }
-
-    public String getOnDeleteAction() {
-        return onDeleteAction;
-    }
-
-    public void setOnDeleteAction(String onDeleteAction) {
-        this.onDeleteAction = onDeleteAction;
-    }
-
-    public String getOnUpdateAction() {
-        return onUpdateAction;
-    }
-
-    public void setOnUpdateAction(String onUpdateAction) {
-        this.onUpdateAction = onUpdateAction;
-    }
-
-    public String getFullReference() {
-        return referencedTableName + "." + referencedColumnName;
     }
 }

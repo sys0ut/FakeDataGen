@@ -20,25 +20,13 @@ public class Table {
         this.name = name;
     }
 
-    // getter, setter
     public String getName() {
         return name;
     }
 
-    public void setName(String name) {
-        this.name = name;
-    }
 
     public String getSchemaName() {
         return schemaName;
-    }
-
-    public void setSchemaName(String schemaName) {
-        this.schemaName = schemaName;
-    }
-
-    public String getFullName() {
-        return name; // 스키마명 제거하고 테이블명만 반환
     }
 
     public List<Column> getColumns() {
@@ -53,16 +41,8 @@ public class Table {
         return foreignKeys;
     }
 
-    public void setForeignKeys(List<ForeignKey> foreignKeys) {
-        this.foreignKeys = foreignKeys;
-    }
-
     public List<Constraint> getConstraints() {
         return constraints;
-    }
-
-    public void setConstraints(List<Constraint> constraints) {
-        this.constraints = constraints;
     }
 
     public void addColumn(Column column) {
@@ -88,14 +68,5 @@ public class Table {
         return columns.stream()
                 .filter(Column::isPrimaryKey)
                 .collect(Collectors.toList());
-    }
-
-    public boolean hasForeignKeyTo(String tableName) {
-        return foreignKeys.stream()
-                .anyMatch(fk -> fk.getReferencedTableName().equals(tableName));
-    }
-
-    public boolean isReferencedBy(String tableName) {
-        return false; // 기본적으로 참조되지 않음
     }
 }

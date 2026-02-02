@@ -1,6 +1,8 @@
 package com.example.fakedatagen.parser.extractor;
 
 import com.example.fakedatagen.model.Table;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
@@ -13,6 +15,8 @@ import java.util.regex.Pattern;
  */
 @Component
 public class TableExtractor {
+    
+    private static final Logger log = LoggerFactory.getLogger(TableExtractor.class);
     
     /**
      * 스키마 텍스트에서 테이블 정의 추출
@@ -38,6 +42,10 @@ public class TableExtractor {
             } else {
                 tables.add(new Table("", tableName));
             }
+        }
+        
+        if (!tables.isEmpty()) {
+            log.debug("    발견된 테이블: {}", tables.stream().map(t -> keepSchemaName ? t.getSchemaName() + "." + t.getName() : t.getName()).toList());
         }
         
         return tables;

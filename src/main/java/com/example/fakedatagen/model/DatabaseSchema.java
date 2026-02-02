@@ -12,40 +12,19 @@ public class DatabaseSchema {
     public DatabaseSchema(String schemaName) {
         this.schemaName = schemaName;
     }
-
-    // getter, setter
-    public String getSchemaName() { 
-        return schemaName; 
-    }
-    
-    public void setSchemaName(String schemaName) { 
-        this.schemaName = schemaName; 
-    }
     
     public List<Table> getTables() { 
         return tables; 
     }
-    
-    public void setTables(List<Table> tables) { 
-        this.tables = tables; 
-    }
-    
+
     public Map<String, List<String>> getDependencies() { 
         return dependencies; 
     }
-    
-    public void setDependencies(Map<String, List<String>> dependencies) { 
-        this.dependencies = dependencies; 
-    }
-    
+
     public List<Relationship> getRelationships() { 
         return relationships; 
     }
-    
-    public void setRelationships(List<Relationship> relationships) { 
-        this.relationships = relationships; 
-    }
-    
+
     public void addTable(Table table) { 
         tables.add(table); 
     }
@@ -65,19 +44,6 @@ public class DatabaseSchema {
         
         return tables.stream()
                 .filter(t -> t.getName().equals(tableNameOnly))
-                .findFirst()
-                .orElse(null);
-    }
-    
-    public List<Table> getRootTables() {
-        return tables.stream()
-                .filter(t -> !dependencies.containsKey(t.getName()))
-                .collect(Collectors.toList());
-    }
-
-    public Table getTableBySchemaAndName(String schemaName, String tableName) {
-        return tables.stream()
-                .filter(t -> t.getSchemaName().equals(schemaName) && t.getName().equals(tableName))
                 .findFirst()
                 .orElse(null);
     }

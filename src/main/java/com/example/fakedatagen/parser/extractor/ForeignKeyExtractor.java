@@ -38,7 +38,6 @@ public class ForeignKeyExtractor {
         while (fkMatcher.find()) {
             String schemaName = fkMatcher.group(1).trim().toLowerCase();
             String tableName = fkMatcher.group(2).trim().toLowerCase();
-            String constraintName = fkMatcher.group(3).trim();
             String fkColumnsRaw = fkMatcher.group(4).trim();
             String refSchemaName = fkMatcher.group(5).trim().toLowerCase();
             String refTable = fkMatcher.group(6).trim().toLowerCase();

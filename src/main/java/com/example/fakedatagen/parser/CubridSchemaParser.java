@@ -4,6 +4,9 @@ import com.example.fakedatagen.model.*;
 import com.example.fakedatagen.parser.extractor.*;
 import com.example.fakedatagen.parser.analyzer.RelationshipAnalyzer;
 import com.example.fakedatagen.parser.builder.TableBuilder;
+import com.example.fakedatagen.exception.SchemaParseException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
@@ -16,6 +19,8 @@ import java.util.Map;
  */
 @Service
 public class CubridSchemaParser {
+    
+    private static final Logger log = LoggerFactory.getLogger(CubridSchemaParser.class);
     
     @Autowired
     private TableExtractor tableExtractor;
@@ -37,8 +42,7 @@ public class CubridSchemaParser {
     
     @Autowired
     private TableBuilder tableBuilder;
-    
-    // 테스트를 위한 setter 메서드들
+
     public void setTableExtractor(TableExtractor tableExtractor) {
         this.tableExtractor = tableExtractor;
     }
@@ -75,23 +79,47 @@ public class CubridSchemaParser {
      * @return 파싱된 DatabaseSchema 객체
      */
     public DatabaseSchema parseSchema(String schemaText, boolean keepSchemaName) {
-        DatabaseSchema schema = new DatabaseSchema("unknown");
+        if (schemaText == null || schemaText.trim().isEmpty()) {
+            throw new SchemaParseException("스키마 텍스트가 비어있습니다");
+        }
         
-        // 1. 테이블 정보 추출
-        List<Table> tables = tableExtractor.extract(schemaText, keepSchemaName);
-        
-        // 2. 각 테이블별 정보 파싱
-        Map<String, List<Column>> columnsMap = columnExtractor.extract(schemaText, keepSchemaName);
-        Map<String, List<String>> pkMap = primaryKeyExtractor.extract(schemaText, keepSchemaName);
-        Map<String, List<String>> uniqueMap = uniqueConstraintExtractor.extract(schemaText, keepSchemaName);
-        Map<String, List<ForeignKey>> fkMap = foreignKeyExtractor.extract(schemaText, keepSchemaName, pkMap);
-        
-        // 3. 테이블 객체 구성 및 스키마에 추가
-        tableBuilder.buildTablesAndAddToSchema(schema, tables, columnsMap, pkMap, uniqueMap, fkMap, keepSchemaName);
-        
-        // 4. 관계 분석 및 의존성 그래프 생성
-        relationshipAnalyzer.analyze(schema);
-        
-        return schema;
+        try {
+            DatabaseSchema schema = new DatabaseSchema("unknown");
+            
+            log.debug("Extracting table definitions");
+            List<Table> tables = tableExtractor.extract(schemaText, keepSchemaName);
+            if (tables.isEmpty()) {
+                throw new SchemaParseException("테이블을 찾을 수 없습니다. CREATE CLASS 구문이 있는지 확인하세요.");
+            }
+            log.debug("Found {} tables", tables.size());
+            
+            log.debug("Extracting column information");
+            Map<String, List<Column>> columnsMap = columnExtractor.extract(schemaText, keepSchemaName);
+            
+            log.debug("Extracting primary key constraints");
+            Map<String, List<String>> pkMap = primaryKeyExtractor.extract(schemaText, keepSchemaName);
+            
+            log.debug("Extracting foreign key constraints");
+            Map<String, List<ForeignKey>> fkMap = foreignKeyExtractor.extract(schemaText, keepSchemaName, pkMap);
+            int totalFk = fkMap.values().stream().mapToInt(List::size).sum();
+            log.debug("Found {} foreign key relationships", totalFk);
+            
+            log.debug("Extracting unique constraints");
+            Map<String, List<String>> uniqueMap = uniqueConstraintExtractor.extract(schemaText, keepSchemaName);
+            
+            log.debug("Building table objects");
+            tableBuilder.buildTablesAndAddToSchema(schema, tables, columnsMap, pkMap, uniqueMap, fkMap, keepSchemaName);
+            
+            log.debug("Analyzing table relationships");
+            relationshipAnalyzer.analyze(schema);
+            log.debug("Relationship analysis completed - found {} relationships", schema.getRelationships().size());
+            
+            return schema;
+        } catch (SchemaParseException e) {
+            throw e;
+        } catch (Exception e) {
+            log.error("Unexpected error during schema parsing", e);
+            throw new SchemaParseException("스키마 파싱 중 오류가 발생했습니다: " + e.getMessage(), e);
+        }
     }
 }
