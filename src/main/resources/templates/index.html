@@ -15,7 +15,8 @@
         <!-- 연결 설정 -->
         <div class="panel" style="margin-bottom:16px;">
             <div class="panel-header"><span>연결 설정</span><button class="btn btn-ghost" onclick="testConnection()">연결 테스트</button></div>
-            <div class="panel-body">
+            <div class="panel-body" id="connectionPanelBody">
+                <div id="connectionAlert" style="display:none; margin-bottom:16px; padding:12px 16px; border-radius:10px; font-size:0.9rem;"></div>
                 <div class="grid grid-2">
                     <div>
                         <label for="dbHost">호스트</label>
@@ -107,7 +108,6 @@
     
     <script>
         function addDbInfoToForm(form) {
-            // 데이터베이스 연결 정보를 폼에 추가
             const dbHost = document.getElementById('dbHost').value;
             const dbPort = document.getElementById('dbPort').value;
             const dbName = document.getElementById('dbName').value;
@@ -131,26 +131,21 @@
             document.getElementById('formDbUsername').value = dbUsername;
             document.getElementById('formDbPassword').value = dbPassword;
             
-            // 로딩 오버레이 표시
             const overlay = document.getElementById('loadingOverlay');
             const submitBtn = document.getElementById('submitBtn');
             const loadingMessage = document.getElementById('loadingMessage');
             
-            // 버튼 비활성화
             submitBtn.disabled = true;
             submitBtn.innerHTML = '처리 중...';
             
-            // 로딩 메시지 설정
             if (recordCount > 100000) {
                 loadingMessage.textContent = recordCount.toLocaleString() + '개 레코드 생성 중... (시간이 걸릴 수 있습니다)';
             } else {
                 loadingMessage.textContent = recordCount.toLocaleString() + '개 레코드 생성 중...';
             }
             
-            // 오버레이 표시
             overlay.style.display = 'flex';
             
-            // 폼 제출은 계속 진행
             return true;
         }
         
@@ -162,10 +157,11 @@
             formData.append('dbUsername', document.getElementById('dbUsername').value);
             formData.append('dbPassword', document.getElementById('dbPassword').value);
             
-            // 버튼 비활성화
             const testBtn = document.querySelector('button[onclick="testConnection()"]');
             testBtn.disabled = true;
             testBtn.innerHTML = '🔄 테스트 중...';
+            
+            const alertDiv = document.getElementById('connectionAlert');
             
             fetch('/test-connection', {
                 method: 'POST',
@@ -173,39 +169,23 @@
             })
             .then(response => response.json())
             .then(data => {
-                const alertClass = data.success ? 'alert-success' : 'alert-danger';
-                const alertHtml = `<div class="alert ${alertClass} alert-dismissible fade show" role="alert">
-                    ${data.message}
-                    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-                </div>`;
-                
-                // 기존 알림 제거
-                const existingAlert = document.querySelector('.card-body .alert');
-                if (existingAlert) {
-                    existingAlert.remove();
-                }
-                
-                // 새 알림 추가
-                document.querySelector('.card-body').insertAdjacentHTML('afterbegin', alertHtml);
+                alertDiv.style.display = 'block';
+                alertDiv.style.background = data.success ? 'rgba(89, 212, 153, 0.15)' : 'rgba(244, 67, 54, 0.15)';
+                alertDiv.style.border = data.success ? '1px solid rgba(89, 212, 153, 0.3)' : '1px solid rgba(244, 67, 54, 0.3)';
+                alertDiv.style.color = data.success ? '#59d499' : '#f44336';
+                alertDiv.textContent = data.message;
             })
             .catch(error => {
                 console.error('Error:', error);
-                const alertHtml = `<div class="alert alert-danger alert-dismissible fade show" role="alert">
-                    연결 테스트 중 오류가 발생했습니다.
-                    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-                </div>`;
-                
-                const existingAlert = document.querySelector('.card-body .alert');
-                if (existingAlert) {
-                    existingAlert.remove();
-                }
-                
-                document.querySelector('.card-body').insertAdjacentHTML('afterbegin', alertHtml);
+                alertDiv.style.display = 'block';
+                alertDiv.style.background = 'rgba(244, 67, 54, 0.15)';
+                alertDiv.style.border = '1px solid rgba(244, 67, 54, 0.3)';
+                alertDiv.style.color = '#f44336';
+                alertDiv.textContent = '연결 테스트 중 오류가 발생했습니다.';
             })
             .finally(() => {
-                // 버튼 다시 활성화
                 testBtn.disabled = false;
-                testBtn.innerHTML = '🔍 연결 테스트';
+                testBtn.innerHTML = '연결 테스트';
             });
         }
     </script>
