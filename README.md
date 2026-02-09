@@ -254,22 +254,3 @@ DB 삽입 (DatabaseInsertRepository)
 ```
 
 ---
-
-## 스크린샷
-
-### 메인 페이지
-- DDL 스키마 입력
-- 연결 설정 및 테스트
-- 레코드 수 / CUBRID 버전 선택
-
-### 결과 페이지
-- 테이블별 컬럼 구조
-- 생성된 가짜 데이터 미리보기
-- DB INSERT 결과 요약
-- 실시간 메모리 모니터링 (JVM + 시스템)
-
----
-
-## 라이선스
-
-This project is licensed under the MIT License.
