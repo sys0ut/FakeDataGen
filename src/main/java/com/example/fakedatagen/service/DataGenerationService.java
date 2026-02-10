@@ -55,9 +55,10 @@ public class DataGenerationService {
      * @param recordCount number of records to generate
      * @param insertToDatabase whether to insert data into database
      * @param dbInfo database connection information
+     * @param useSchemaQualifiedTableName whether to use schema.table format (CUBRID 11.2+)
      * @return generated data and insertion results
      */
-    public DataGenerationResult generateAndInsertData(DatabaseSchema schema, int recordCount, boolean insertToDatabase, DatabaseConnectionInfo dbInfo) {
+    public DataGenerationResult generateAndInsertData(DatabaseSchema schema, int recordCount, boolean insertToDatabase, DatabaseConnectionInfo dbInfo, boolean useSchemaQualifiedTableName) {
         PerformanceMetrics metrics = PerformanceMetrics.start("Data Generation");
         validateInput(schema, recordCount, insertToDatabase, dbInfo);
 
@@ -109,8 +110,8 @@ public class DataGenerationService {
             final Map<String, Integer> tableInsertCounts = new HashMap<>(properties.getInitialCapacity().getMedium());
             final java.util.List<String> warnings = new java.util.ArrayList<>();
 
-            totalInserted = txTemplate.execute(status -> {
-                deleteExistingData(jdbcTemplate, orderedTableNames);
+            Integer insertedCount = txTemplate.execute(status -> {
+                deleteExistingData(jdbcTemplate, orderedTableNames, useSchemaQualifiedTableName);
                 
                 int inserted = 0;
                 for (String tableName : orderedTableNames) {
@@ -127,17 +128,16 @@ public class DataGenerationService {
                         if (tableData != null && !tableData.isEmpty()) {
                             log.debug("Inserting data into table: {} ({} records)", tableName, tableData.size());
                             
-                            // 재시도 로직 적용
                             List<Long> generatedKeys;
                             if (properties.getRetry().isEnabled()) {
                                 generatedKeys = RetryHelper.executeWithRetry(
-                                        () -> insertRecordsWithDynamicConnection(jdbcTemplate, tableName, tableData, schema),
+                                        () -> insertRecordsWithDynamicConnection(jdbcTemplate, tableName, tableData, schema, useSchemaQualifiedTableName),
                                         properties.getRetry().getMaxAttempts(),
                                         properties.getRetry().getDelay(),
                                         properties.getRetry().getBackoffMultiplier()
                                 );
                             } else {
-                                generatedKeys = insertRecordsWithDynamicConnection(jdbcTemplate, tableName, tableData, schema);
+                                generatedKeys = insertRecordsWithDynamicConnection(jdbcTemplate, tableName, tableData, schema, useSchemaQualifiedTableName);
                             }
                             
                             generatedKeysMap.put(tableName, generatedKeys);
@@ -150,13 +150,12 @@ public class DataGenerationService {
                         }
                     } catch (Exception e) {
                         log.error("Failed to insert data into table: {} - {}", tableName, e.getMessage(), e);
-                        // 트랜잭션 내에서 실패 시 전체 롤백을 위해 예외를 다시 던짐
-                        // 부분 실패를 허용하려면 이 부분을 주석 처리하고 warnings에만 추가
                         throw new DataGenerationException("테이블 '" + tableName + "' 삽입 실패: " + e.getMessage(), e);
                     }
                 }
                 return inserted;
             });
+            totalInserted = insertedCount != null ? insertedCount : 0;
 
             insertMessage = buildInsertMessage(warnings);
             
@@ -199,36 +198,76 @@ public class DataGenerationService {
         }
     }
     
-    private void deleteExistingData(JdbcTemplate jdbcTemplate, List<String> orderedTableNames) {
+    private void deleteExistingData(JdbcTemplate jdbcTemplate, List<String> orderedTableNames, boolean useSchemaQualifiedTableName) {
         log.info("기존 데이터 삭제 시작 - {}개 테이블", orderedTableNames.size());
         int deletedCount = 0;
         int totalRowsDeleted = 0;
         for (int i = orderedTableNames.size() - 1; i >= 0; i--) {
             String tableName = orderedTableNames.get(i);
             try {
-                String sanitizedTableName = sanitizeTableName(tableName);
+                String sanitizedTableName = sanitizeTableName(tableName, useSchemaQualifiedTableName);
                 String sql = "DELETE FROM " + sanitizedTableName;
-                int rowsDeleted = jdbcTemplate.update(sql);
+                int rowsDeleted = 0;
+                try {
+                    rowsDeleted = jdbcTemplate.update(sql);
+                } catch (Exception firstEx) {
+                    // 실패하면 로그만 남기고, 필요 시 schema 제거한 SQL로 한 번 더 시도 후 그래도 실패면 스킵한다.
+                    if (useSchemaQualifiedTableName && tableName != null && tableName.contains(".")) {
+                        String fallbackTableName = sanitizeTableName(tableName, false);
+                        String fallbackSql = "DELETE FROM " + fallbackTableName;
+                        // sanitize 정책상 schema를 항상 제거하면 fallbackSql == sql 이 될 수 있어 중복 실행을 방지한다.
+                        if (!fallbackSql.equals(sql)) {
+                            try {
+                                rowsDeleted = jdbcTemplate.update(fallbackSql);
+                                log.warn("기존 데이터 삭제 재시도 성공(unqualified) - originalTable={}, sql={}, fallbackSql={}",
+                                        tableName, sql, fallbackSql);
+                            } catch (Exception secondEx) {
+                                log.warn("기존 데이터 삭제 실패(스킵) - table={}, sql={}, fallbackSql={}, reason={}",
+                                        tableName, sql, fallbackSql, secondEx.getMessage());
+                                deletedCount++;
+                                continue;
+                            }
+                        } else {
+                            log.warn("기존 데이터 삭제 실패(스킵) - table={}, sql={}, reason={}",
+                                    tableName, sql, firstEx.getMessage());
+                            deletedCount++;
+                            continue;
+                        }
+                    } else {
+                        log.warn("기존 데이터 삭제 실패(스킵) - table={}, sql={}, reason={}",
+                                tableName, sql, firstEx.getMessage());
+                        deletedCount++;
+                        continue;
+                    }
+                }
                 if (rowsDeleted > 0) {
                     log.info("테이블 '{}'에서 {}개 행 삭제됨", tableName, rowsDeleted);
                     totalRowsDeleted += rowsDeleted;
                 }
                 deletedCount++;
             } catch (Exception e) {
-                throw new DataGenerationException("기존 데이터 삭제 중 오류 발생: " + tableName + " - " + e.getMessage(), e);
+                // deleteExistingData 단계에서는 어떤 오류든 스킵 (요청사항)
+                log.warn("기존 데이터 삭제 처리 중 예외(스킵) - table={}, reason={}", tableName, e.getMessage(), e);
+                deletedCount++;
             }
         }
         log.info("기존 데이터 삭제 완료 - {}개 테이블, 총 {}개 행 삭제됨", deletedCount, totalRowsDeleted);
     }
     
-    private String sanitizeTableName(String tableName) {
-        if (tableName.contains(".")) {
-            String schemaName = tableName.substring(0, tableName.lastIndexOf("."));
-            String tableNameOnly = tableName.substring(tableName.lastIndexOf(".") + 1);
-            return "[" + schemaName.replace("]", "]]") + "].[" + tableNameOnly.replace("]", "]]") + "]";
-        } else {
-            return "[" + tableName.replace("]", "]]") + "]";
+    private String sanitizeTableName(String tableName, boolean useSchemaQualifiedTableName) {
+        if (tableName == null || tableName.isBlank()) {
+            throw new IllegalArgumentException("tableName is blank");
         }
+        // UI의 "11.2 이상" 토글이 켜진 경우 schema.table 형태를 사용한다.
+        // 단, 환경에 따라 owner.table이 실패할 수 있으므로 호출부에서 fallback(unqualified) 재시도를 한다.
+        if (useSchemaQualifiedTableName && tableName.contains(".")) {
+            String schemaName = tableName.substring(0, tableName.lastIndexOf(".")).trim();
+            String tableNameOnly = tableName.substring(tableName.lastIndexOf(".") + 1).trim();
+            return schemaName + "." + tableNameOnly;
+        }
+        return tableName.contains(".")
+                ? tableName.substring(tableName.lastIndexOf(".") + 1).trim()
+                : tableName.trim();
     }
     
     private String buildInsertMessage(List<String> warnings) {
@@ -306,8 +345,8 @@ public class DataGenerationService {
     }
     
     private List<Long> insertRecordsWithDynamicConnection(JdbcTemplate jdbcTemplate, String tableName, 
-                                                        List<Map<String, Object>> records, DatabaseSchema schema) {
-        return databaseInsertRepository.insertRecordsWithJdbcTemplate(jdbcTemplate, tableName, records, schema);
+                                                        List<Map<String, Object>> records, DatabaseSchema schema, boolean useSchemaQualifiedTableName) {
+        return databaseInsertRepository.insertRecordsWithJdbcTemplate(jdbcTemplate, tableName, records, schema, useSchemaQualifiedTableName);
     }
     
     public boolean testConnection(DatabaseConnectionInfo dbInfo) {

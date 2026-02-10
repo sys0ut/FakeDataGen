@@ -69,7 +69,7 @@ public class SchemaController {
             log.info("Schema parsing completed - found {} tables", schema.getTables().size());
             
             DataGenerationService.DataGenerationResult result = 
-                    dataGenerationService.generateAndInsertData(schema, recordCount, insertToDatabase, dbInfo);
+                    dataGenerationService.generateAndInsertData(schema, recordCount, insertToDatabase, dbInfo, cubridVersion112);
             
             log.info("Data generation process completed - totalInserted={}", result.getTotalInserted());
             

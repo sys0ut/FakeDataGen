@@ -197,6 +197,22 @@ public class BasicValueGenerator {
             fakerType = "faker.lorem().paragraph()";
             recordFakerMapping(tableName, columnName, fakerType);
             return getFaker().lorem().paragraph();
+        } else if (isTzOrLtzType(dataType)) {
+            fakerType = "ZonedDateTime(Asia/Seoul)";
+            recordFakerMapping(tableName, columnName, fakerType);
+
+            java.time.ZoneId zone = java.time.ZoneId.of("Asia/Seoul");
+            java.time.ZonedDateTime now = java.time.ZonedDateTime.now(zone);
+            Faker faker = getFaker();
+            java.time.ZonedDateTime randomZdt = now.minusDays(faker.number().numberBetween(1, 365))
+                    .withHour(faker.number().numberBetween(0, 24))
+                    .withMinute(faker.number().numberBetween(0, 60))
+                    .withSecond(faker.number().numberBetween(0, 60))
+                    .withNano(0);
+
+            java.time.format.DateTimeFormatter fmt =
+                    java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSS VV");
+            return randomZdt.format(fmt);
         } else if (dataType.contains("timestamp")) {
             // TIMESTAMP 타입 - 현재 시간 기준으로 랜덤 생성
             fakerType = "LocalDateTime.random()";
@@ -328,6 +344,18 @@ public class BasicValueGenerator {
             recordFakerMapping(tableName, columnName, fakerType);
             return getFaker().lorem().word();
         }
+    }
+
+    private boolean isTzOrLtzType(String dataTypeLower) {
+        if (dataTypeLower == null) {
+            return false;
+        }
+        // 공백 제거(예: "timestamp tz" 같은 형태 방어)
+        String dt = dataTypeLower.replaceAll("\\s+", "");
+        return dt.contains("timestamptz")
+                || dt.contains("timestampltz")
+                || dt.contains("datetimetz")
+                || dt.contains("datetimeltz");
     }
     
     private void recordFakerMapping(String tableName, String columnName, String fakerType) {

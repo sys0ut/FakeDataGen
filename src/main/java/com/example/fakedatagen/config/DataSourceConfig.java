@@ -17,7 +17,7 @@ public class DataSourceConfig {
     private static final Logger log = LoggerFactory.getLogger(DataSourceConfig.class);
     
     /**
-     * CUBRID에 최적화된 HikariCP 설정
+     * HikariCP 설정
      */
     private static final int DEFAULT_MAX_POOL_SIZE = 10;
     private static final int DEFAULT_MIN_IDLE = 2;

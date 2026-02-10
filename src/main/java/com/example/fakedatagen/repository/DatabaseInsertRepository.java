@@ -51,6 +51,7 @@ public class DatabaseInsertRepository {
         }
         
         String dataType = column.getDataType().toLowerCase();
+        String dataTypeNoSpaces = dataType.replaceAll("\\s+", "");
         
         try {
             if (dataType.contains("bigint") || dataType.contains("long")) {
@@ -143,6 +144,11 @@ public class DatabaseInsertRepository {
                     }
                 }
                 return value;
+            } else if (dataTypeNoSpaces.contains("timestamptz") || dataTypeNoSpaces.contains("timestampltz")
+                    || dataTypeNoSpaces.contains("datetimetz") || dataTypeNoSpaces.contains("datetimeltz")) {
+                // TZ/LTZ 계열은 Timestamp로 변환하지 말고 "타임존 포함 문자열" 그대로 바인딩한다.
+                // (Generator에서 TZ 문자열을 만들어주며, 이미 Timestamp/LocalDateTime 객체면 toString()으로 내려보낸다)
+                return value.toString();
             } else if (dataType.contains("datetime") || dataType.contains("timestamp")) {
                 if (value instanceof Timestamp) {
                     return value;
@@ -222,26 +228,40 @@ public class DatabaseInsertRepository {
 
     public boolean tableExists(String tableName) {
         try {
-            String sanitizedTableName = sanitizeTableName(tableName);
+            String sanitizedTableName = sanitizeTableName(tableName, true);
             String sql = "SELECT COUNT(*) FROM " + sanitizedTableName + " WHERE 1=0";
             jdbcTemplate.queryForObject(sql, Integer.class);
             return true;
         } catch (Exception e) {
+            // schema-qualified가 실패하면 unqualified로 한 번 더 확인
+            if (tableName != null && tableName.contains(".")) {
+                try {
+                    String fallbackTableName = sanitizeTableName(tableName, false);
+                    String fallbackSql = "SELECT COUNT(*) FROM " + fallbackTableName + " WHERE 1=0";
+                    jdbcTemplate.queryForObject(fallbackSql, Integer.class);
+                    return true;
+                } catch (Exception ignored) {
+                    // ignore
+                }
+            }
             return false;
         }
     }
     
-    private String sanitizeTableName(String tableName) {
-        if (tableName.contains(".")) {
-            String schemaName = tableName.substring(0, tableName.lastIndexOf("."));
-            String tableNameOnly = tableName.substring(tableName.lastIndexOf(".") + 1);
-            return "[" + schemaName.replace("]", "]]") + "].[" + tableNameOnly.replace("]", "]]") + "]";
-        } else {
-            return "[" + tableName.replace("]", "]]") + "]";
+    private String sanitizeTableName(String tableName, boolean useSchemaQualifiedTableName) {
+        if (tableName == null || tableName.isBlank()) {
+            throw new IllegalArgumentException("tableName is blank");
         }
+        // UI의 "11.2 이상" 토글이 켜진 경우 schema.table 형태를 사용한다.
+        if (useSchemaQualifiedTableName && tableName.contains(".")) {
+            String schemaName = tableName.substring(0, tableName.lastIndexOf(".")).trim();
+            String tableNameOnly = tableName.substring(tableName.lastIndexOf(".") + 1).trim();
+            return schemaName + "." + tableNameOnly;
+        }
+        return tableName.contains(".") ? tableName.substring(tableName.lastIndexOf(".") + 1).trim() : tableName.trim();
     }
     public List<Long> insertRecordsWithJdbcTemplate(JdbcTemplate jdbcTemplate, String tableName, 
-                                                   List<Map<String, Object>> records, DatabaseSchema schema) {
+                                                   List<Map<String, Object>> records, DatabaseSchema schema, boolean useSchemaQualifiedTableName) {
         if (records == null || records.isEmpty()) {
             return new ArrayList<>();
         }
@@ -289,15 +309,16 @@ public class DatabaseInsertRepository {
         }
         
         final List<String> finalColumnNames = existingColumns;
+        String sanitizedTableName = sanitizeTableName(tableName, useSchemaQualifiedTableName);
         StringBuilder sqlBuilder = new StringBuilder();
-        sqlBuilder.append("INSERT INTO ").append(tableName);
+        sqlBuilder.append("INSERT INTO ").append(sanitizedTableName);
         
         if (columnNames.isEmpty()) {
             if (!autoIncrementColumns.isEmpty()) {
                 sqlBuilder.append(" (");
                 for (int i = 0; i < autoIncrementColumns.size(); i++) {
                     if (i > 0) sqlBuilder.append(", ");
-                    sqlBuilder.append("[").append(autoIncrementColumns.get(i)).append("]");
+                    sqlBuilder.append(autoIncrementColumns.get(i));
                 }
                 sqlBuilder.append(") VALUES (");
                 for (int i = 0; i < autoIncrementColumns.size(); i++) {
@@ -312,7 +333,7 @@ public class DatabaseInsertRepository {
             sqlBuilder.append(" (");
             for (int i = 0; i < finalColumnNames.size(); i++) {
                 if (i > 0) sqlBuilder.append(", ");
-                sqlBuilder.append("[").append(finalColumnNames.get(i)).append("]");
+                sqlBuilder.append(finalColumnNames.get(i));
             }
             sqlBuilder.append(") VALUES (");
             for (int i = 0; i < finalColumnNames.size(); i++) {
@@ -327,53 +348,21 @@ public class DatabaseInsertRepository {
         if (!autoIncrementColumns.isEmpty()) {
             int batchSize = properties.getBatchSize();
             int totalRecords = records.size();
-            
-            jdbcTemplate.execute((Connection conn) -> {
-                try (PreparedStatement ps = conn.prepareStatement(sql, java.sql.Statement.RETURN_GENERATED_KEYS)) {
-                    for (int recordIdx = 0; recordIdx < totalRecords; recordIdx++) {
-                        Map<String, Object> record = records.get(recordIdx);
-                        
-                        if (!finalColumnNames.isEmpty()) {
-                            for (int j = 0; j < finalColumnNames.size(); j++) {
-                                String columnName = finalColumnNames.get(j);
-                                Column column = table.getColumnByName(columnName);
-                                Object value = record.get(columnName);
-                                Object convertedValue = (column != null) ? convertValueByColumnType(value, column) : value;
-                                ps.setObject(j + 1, convertedValue);
-                            }
-                        }
-                        ps.addBatch();
-                        
-                        if ((recordIdx + 1) % batchSize == 0 || recordIdx == totalRecords - 1) {
-                            int[] updateCounts = ps.executeBatch();
-                            try (java.sql.ResultSet rs = ps.getGeneratedKeys()) {
-                                int keyCount = 0;
-                                while (rs.next() && keyCount < updateCounts.length) {
-                                    generatedKeys.add(rs.getLong(1));
-                                    keyCount++;
-                                }
-                                if (keyCount < updateCounts.length) {
-                                    try {
-                                        String maxIdSql = "SELECT COALESCE(MAX([" + autoIncrementColumns.get(0) + "]), 0) FROM " + tableName;
-                                        Long currentMax = jdbcTemplate.queryForObject(maxIdSql, Long.class);
-                                        for (int i = keyCount; i < updateCounts.length; i++) {
-                                            generatedKeys.add(currentMax - (updateCounts.length - i - 1));
-                                        }
-                                    } catch (Exception ex) {
-                                        for (int i = keyCount; i < updateCounts.length; i++) {
-                                            generatedKeys.add(0L);
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                } catch (Exception e) {
-                    log.error("AUTO_INCREMENT INSERT 실패 - table={}", tableName, e);
+            try {
+                doAutoIncrementInsert(jdbcTemplate, sql, sanitizedTableName, records, finalColumnNames, autoIncrementColumns,
+                        batchSize, totalRecords, tableName, table, generatedKeys);
+            } catch (Exception e) {
+                if (useSchemaQualifiedTableName && tableName != null && tableName.contains(".")) {
+                    String fallbackSanitizedTableName = sanitizeTableName(tableName, false);
+                    String fallbackSql = sql.replace("INSERT INTO " + sanitizedTableName, "INSERT INTO " + fallbackSanitizedTableName);
+                    log.warn("AUTO_INCREMENT INSERT 실패로 unqualified로 재시도 - table={}, sql={}, fallbackSql={}, reason={}",
+                            tableName, sql, fallbackSql, e.getMessage());
+                    doAutoIncrementInsert(jdbcTemplate, fallbackSql, fallbackSanitizedTableName, records, finalColumnNames, autoIncrementColumns,
+                            batchSize, totalRecords, tableName, table, generatedKeys);
+                } else {
                     throw e;
                 }
-                return null;
-            });
+            }
         } else {
             int batchSize = properties.getBatchSize();
             int totalRecords = records.size();
@@ -396,13 +385,89 @@ public class DatabaseInsertRepository {
                         generatedKeys.add(0L);
                     }
                 } catch (Exception e) {
-                    log.error("배치 INSERT 실패 - table={}, batch={}~{}", tableName, batchStart, batchEnd, e);
-                    throw new RuntimeException("배치 INSERT 실패: " + tableName + " (배치 " + batchStart + "~" + batchEnd + ") - " + e.getMessage(), e);
+                    if (useSchemaQualifiedTableName && tableName != null && tableName.contains(".")) {
+                        String fallbackSanitizedTableName = sanitizeTableName(tableName, false);
+                        String fallbackSql = sql.replace("INSERT INTO " + sanitizedTableName, "INSERT INTO " + fallbackSanitizedTableName);
+                        try {
+                            log.warn("배치 INSERT 실패로 unqualified로 재시도 - table={}, batch={}~{}, sql={}, fallbackSql={}, reason={}",
+                                    tableName, batchStart, batchEnd, sql, fallbackSql, e.getMessage());
+                            jdbcTemplate.batchUpdate(fallbackSql, batch, batch.size(), (ps, record) -> {
+                                for (int i = 0; i < finalColumnNames.size(); i++) {
+                                    String columnName = finalColumnNames.get(i);
+                                    Column column = table.getColumnByName(columnName);
+                                    Object value = record.get(columnName);
+                                    Object convertedValue = (column != null) ? convertValueByColumnType(value, column) : value;
+                                    ps.setObject(i + 1, convertedValue);
+                                }
+                            });
+                            for (int i = 0; i < batch.size(); i++) {
+                                generatedKeys.add(0L);
+                            }
+                        } catch (Exception fallbackEx) {
+                            log.error("배치 INSERT 실패 - table={}, batch={}~{}", tableName, batchStart, batchEnd, fallbackEx);
+                            throw new RuntimeException("배치 INSERT 실패: " + tableName + " (배치 " + batchStart + "~" + batchEnd + ") - " + fallbackEx.getMessage(), fallbackEx);
+                        }
+                    } else {
+                        log.error("배치 INSERT 실패 - table={}, batch={}~{}", tableName, batchStart, batchEnd, e);
+                        throw new RuntimeException("배치 INSERT 실패: " + tableName + " (배치 " + batchStart + "~" + batchEnd + ") - " + e.getMessage(), e);
+                    }
                 }
             }
         }
         
         return generatedKeys;
+    }
+
+    private void doAutoIncrementInsert(JdbcTemplate jdbcTemplate, String sql, String sanitizedTableName,
+                                      List<Map<String, Object>> records, List<String> finalColumnNames,
+                                      List<String> autoIncrementColumns, int batchSize, int totalRecords,
+                                      String tableName, Table table, List<Long> generatedKeys) {
+        jdbcTemplate.execute((Connection conn) -> {
+            try (PreparedStatement ps = conn.prepareStatement(sql, java.sql.Statement.RETURN_GENERATED_KEYS)) {
+                for (int recordIdx = 0; recordIdx < totalRecords; recordIdx++) {
+                    Map<String, Object> record = records.get(recordIdx);
+
+                    if (!finalColumnNames.isEmpty()) {
+                        for (int j = 0; j < finalColumnNames.size(); j++) {
+                            String columnName = finalColumnNames.get(j);
+                            Column column = table.getColumnByName(columnName);
+                            Object value = record.get(columnName);
+                            Object convertedValue = (column != null) ? convertValueByColumnType(value, column) : value;
+                            ps.setObject(j + 1, convertedValue);
+                        }
+                    }
+                    ps.addBatch();
+
+                    if ((recordIdx + 1) % batchSize == 0 || recordIdx == totalRecords - 1) {
+                        int[] updateCounts = ps.executeBatch();
+                        try (java.sql.ResultSet rs = ps.getGeneratedKeys()) {
+                            int keyCount = 0;
+                            while (rs.next() && keyCount < updateCounts.length) {
+                                generatedKeys.add(rs.getLong(1));
+                                keyCount++;
+                            }
+                            if (keyCount < updateCounts.length) {
+                                try {
+                                    String maxIdSql = "SELECT COALESCE(MAX(" + autoIncrementColumns.get(0) + "), 0) FROM " + sanitizedTableName;
+                                    Long currentMax = jdbcTemplate.queryForObject(maxIdSql, Long.class);
+                                    for (int i = keyCount; i < updateCounts.length; i++) {
+                                        generatedKeys.add(currentMax - (updateCounts.length - i - 1));
+                                    }
+                                } catch (Exception ex) {
+                                    for (int i = keyCount; i < updateCounts.length; i++) {
+                                        generatedKeys.add(0L);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            } catch (Exception e) {
+                log.error("AUTO_INCREMENT INSERT 실패 - table={}", tableName, e);
+                throw e;
+            }
+            return null;
+        });
     }
     
 }
